@@ -31,8 +31,33 @@ local serInf, serInfMac = "1.#INF", "inf"
 local serNegInf, serNegInfMac = "-1.#INF", "-inf"
 
 
--- Serialization functions
+-- Array helper functions
+local function checkIsArray(t)
+	local i = 0
+	for _ in pairs(t) do
+		i = i + 1
+		if t[i] == nil then
+			return false
+		end
+	end
 
+	return true
+end
+
+local function isArray(t)
+	local mt = getmetatable(t)
+	if mt ~= nil and mt.__isarray ~= nil then
+		return mt.__isarray
+	end
+
+	local is = checkIsArray(t)
+
+	setmetatable(t, {__isarray = is})
+
+	return is
+end
+
+-- Serialization functions
 local function SerializeStringHelper(ch)	-- Used by SerializeValue for strings
 	-- We use \126 ("~") as an escape character for all nonprints plus a few more
 	local n = strbyte(ch)
@@ -79,7 +104,16 @@ local function SerializeValue(v, res, nres)
 			res[nres+4] = tostring(e-53)	-- adjust exponent to counteract mantissa manipulation
 			nres=nres+4
 		end
-	
+
+	elseif t=="table" and isArray(v) then	-- ^A...^a = array (list of values)
+		nres=nres+1
+		res[nres] = "^A"
+		for _,v in ipairs(v) do
+			nres = SerializeValue(v, res, nres)
+		end
+		nres=nres+1
+		res[nres] = "^a"
+
 	elseif t=="table" then	-- ^T...^t = table (list of key,value pairs)
 		nres=nres+1
 		res[nres] = "^T"
@@ -210,6 +244,21 @@ local function DeserializeValue(iter,single,ctl,data)
 		res = false
 	elseif ctl=="^Z" then	-- yeah yeah ignore data portion
 		res = nil
+	elseif ctl=="^A" then
+		-- ignore ^A's data, future extensibility?
+		res = {}
+		local k = 1
+		local v
+		while true do
+			ctl,data = iter()
+			if ctl=="^a" then break end	-- ignore ^a's data
+			v = DeserializeValue(iter,true,ctl,data)
+			if v==nil then
+				error("Invalid AceSerializer table format (no table end marker)")
+			end
+			res[k]=v
+			k = k + 1
+		end
 	elseif ctl=="^T" then
 		-- ignore ^T's data, future extensibility?
 		res = {}
